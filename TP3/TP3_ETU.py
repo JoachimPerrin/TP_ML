@@ -1,6 +1,4 @@
-
 # Transfert learning et Fine tuning sur caltech101
-
 
 import numpy as np
 import os
@@ -14,8 +12,6 @@ from tensorflow.keras.layers import Dense, Flatten, Dropout, SpatialDropout2D, C
 from tensorflow.keras.datasets.mnist import load_data
 from sklearn.model_selection import train_test_split
 from matplotlib import pyplot as plt
-
-
 
 def affiche(history):
     # summarize history for accuracy
@@ -34,8 +30,6 @@ def affiche(history):
     plt.xlabel('epoch')
     plt.legend(['train', 'test'], loc='upper left')
     plt.show()
-
-
 
 ##########################
 # 1.1 Chargement et mise en forme des données
@@ -82,7 +76,6 @@ print('train / test split:',  len(X_train), len(X_test))
 print('training data shape: ', X_train.shape)
 print('training label shape: ', len(y_train))
 
-
 shape = X_train[0].shape
 
 ##########################
@@ -116,7 +109,7 @@ epochs=40
 ad= tf.keras.optimizers.Adam(learning_rate=lr)
 model.compile(loss='categorical_crossentropy', optimizer=ad, metrics=['accuracy'])
 tps1 = time.time()
-history =model.fit(X_train, Y_train, batch_size=batch_size, epochs=epochs, verbose=1,validation_data=(X_test, Y_test))
+history =model.fit(X_train, Y_train, batch_size=batch_size, epochs=epochs, verbose=1, validation_data=(X_test, Y_test))
 tps2 = time.time()
 
 affiche(history)

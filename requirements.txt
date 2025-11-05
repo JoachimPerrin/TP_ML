@@ -1,4 +1,11 @@
+-r TP1/requirements.txt
+-r TP2/requirements.txt
+-r TP3/requirements.txt
+-r TP4/requirements.txt
+
 numpy
 matplotlib
 scikit-learn
 cvxopt
+tensorflow
+keras
