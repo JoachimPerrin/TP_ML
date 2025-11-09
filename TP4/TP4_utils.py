@@ -82,9 +82,10 @@ def eval_classif(Y_true, Y_pred, threshold=0.5):
     
 def unet_simple(input_shape):
     inputs = layers.Input(input_shape)
+    x = layers.RandomFlip("horizontal")(inputs)
 
     # Encoder
-    c1 = layers.Conv2D(16, (3, 3), activation='relu', padding='same', name='c1')(inputs)
+    c1 = layers.Conv2D(16, (3, 3), activation='relu', padding='same', name='c1')(x)
     c1 = layers.Conv2D(16, (3, 3), activation='relu', padding='same', name='c1_2')(c1)
     p1 = layers.MaxPooling2D((2, 2), name='p1')(c1)
 

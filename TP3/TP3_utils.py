@@ -1,12 +1,11 @@
-# Transfert learning et Fine tuning sur caltech101
-
 import numpy as np
 import os
 import random
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import Sequential, Model, Input
-from tensorflow.keras.layers import Dense, Flatten, Dropout, SpatialDropout2D, Conv2D, MaxPooling2D, Reshape, Conv2DTranspose, Resizing, BatchNormalization, Lambda
+from tensorflow.keras import layers
+from tensorflow.keras.layers import Dense, Flatten, Dropout, SpatialDropout2D, Convolution2D, Conv2D, MaxPooling2D, Reshape, Conv2DTranspose, Resizing, BatchNormalization, Lambda
 from tensorflow.keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, classification_report, ConfusionMatrixDisplay, accuracy_score
@@ -43,9 +42,6 @@ def eval_classif(Y_true, Y_pred):
     # Rapport de classification
     print("\nClassification report:")
     print(classification_report(y_true_classes, y_pred_classes))
-
-    global_acc = accuracy_score(y_true_classes, y_pred_classes)
-    print(f"\nPrécision globale: {global_acc:.4f}")
 
 #%% Data preparation
 def load_dataset(data_path, categories, target_size=(224, 224), train_split=0.7):
@@ -90,141 +86,151 @@ def load_mnist_with_noise(noise_train=0.2, noise_test=0.4):
     from tensorflow.keras.datasets.mnist import load_data
 
     # Load MNIST
-    (X_train, y_train), (X_test, y_test) = load_data()
+    (X_train, Y_train), (X_test, Y_test) = load_data()
 
-    # Reshape to (samples, height, width, channels)
-    X_train = X_train.reshape((-1, 28, 28, 1)).astype('float32') / 255.0
-    X_test  = X_test.reshape((-1, 28, 28, 1)).astype('float32') / 255.0
+    # Preprocess input data
+    X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], X_train.shape[2], 1)
+    X_test = X_test.reshape(X_test.shape[0], X_train.shape[1], X_train.shape[2], 1)
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    X_train /= 255
+    X_test /= 255
 
-    # One-hot encode labels
-    Y_train = to_categorical(y_train, 10)
-    Y_test  = to_categorical(y_test, 10)
-
-    # Add Gaussian noise
-    X_train_noisy = X_train + noise_train * np.random.normal(loc=0.0, scale=1.0, size=X_train.shape)
-    X_test_noisy  = X_test  + noise_test  * np.random.normal(loc=0.0, scale=1.0, size=X_test.shape)
+    # Add noise
+    X_train_noise = X_train + 0.2 * np.random.normal(loc=0.0, scale=1.0, size=X_train.shape)
+    X_test_noise = X_test + 0.4 * np.random.normal(loc=0.0, scale=1.0, size=X_test.shape)
 
     # Clip to [0,1]
-    X_train_noisy = np.clip(X_train_noisy, 0.0, 1.0)
-    X_test_noisy  = np.clip(X_test_noisy, 0.0, 1.0)
+    X_train_noise = np.clip(X_train_noise, 0.0, 1.0)
+    X_test_noise = np.clip(X_test_noise, 0.0, 1.0)
 
-    return (X_train, Y_train, X_train_noisy), (X_test, Y_test, X_test_noisy)
+    return (X_train, Y_train, X_train_noise), (X_test, Y_test, X_test_noise)
 
 
 #%% Model definition
 data_augmentation = tf.keras.Sequential([
     # tf.keras.layers.RandomFlip("vertical"),
-    tf.keras.layers.RandomFlip("horizontal"),
-    # tf.keras.layers.RandomRotation(0.2),
-    # tf.keras.layers.RandomZoom(0.2),
-    # tf.keras.layers.RandomContrast(0.1)
+    # tf.keras.layers.RandomFlip("horizontal"),
+    tf.keras.layers.RandomRotation(0.1),
+    # tf.keras.layers.RandomZoom(0.1),
+    # tf.keras.layers.RandomContrast(100)
 ])
 
 def CNN(shape, nb_classes=4):
     inputs = Input(shape)
+    x = data_augmentation(inputs)
 
-    x=Conv2D(32,(3,3), activation='relu',padding='same')(inputs)
-    x=MaxPooling2D(pool_size=(3, 3), strides=2,padding='same')(x)
+    x=Conv2D(16,(3, 3), activation='relu',padding='same')(x)
+    x=MaxPooling2D(pool_size=(2, 2), strides=2,padding='same')(x)
+    # x=Dropout(0.1)(x)
+
+    x=Conv2D(32,(3, 3), activation='relu',padding='same')(x)
+    x=Conv2D(32,(3, 3), activation='relu',padding='same')(x)
+    x=MaxPooling2D(pool_size=(2, 2), strides=2,padding='same')(x)
+    x=Dropout(0.05)(x)
 
     x=Conv2D(64,(3, 3), activation='relu',padding='same')(x)
-    x=MaxPooling2D(pool_size=(3, 3), strides=2,padding='same')(x)
-    
+    x=Conv2D(64,(3, 3), activation='relu',padding='same')(x)
+    x=Dropout(0.1)(x)
+
     x=Flatten()(x)
     x=Dense(100, activation='relu')(x)
+    x=Dropout(0.35)(x)
     outputs=Dense(nb_classes, activation='softmax')(x)
 
     return Model(inputs, outputs)
 
-def MLP_transfer(shape, nb_classes):
-    inputs = Input(shape)
-    x = Flatten()(inputs)
-    x = Dense(128, activation='relu')(x) # To be tuned (number of neurons, layers etc.)
-    # Softmax activation for multi-class classification
-    outputs = Dense(nb_classes, activation='softmax')(x)
-    model = Model(inputs, outputs)
-    return model
+def MLP_transfer(input_tensor, nb_classes):
+    x = Dense(256, activation='relu')(input_tensor)
+    x = Dropout(0.5)(x)
+    x = Dense(128, activation='relu')(x)
+    x = Dropout(0.3)(x)
+    return Dense(nb_classes, activation='softmax')(x)
 
-def encoder(shape):
-    inputs = Input(shape)
+
+def build_autoencoder(shape):
+    inputs = layers.Input(shape)
+
+    # Encodeur
+    x = layers.Conv2D(16, (3,3), activation='relu', padding='same')(inputs)
+    x = layers.MaxPooling2D((2,2), padding='same')(x)
+    x = layers.Conv2D(32, (3,3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling2D((2,2), padding='same')(x)
+
+    # Code latent
+    x = layers.Conv2D(64, (3,3), activation='relu', padding='same')(x)
     
-    # Encoder
-    c1 = Conv2D(16, (3, 3), activation='relu', padding='same')(inputs)
-    p1 = MaxPooling2D((2, 2), name='p1')(c1)
+    # Décodeur
+    x = layers.Conv2DTranspose(32, (3,3), strides=2, activation='relu', padding='same')(x)
+    x = layers.Conv2DTranspose(16, (3,3), strides=2, activation='relu', padding='same')(x)
     
-    c2 = Conv2D(32, (3, 3), activation='relu', padding='same')(p1)
-    p2 = MaxPooling2D((2, 2), name='p2')(c2)
+    outputs = layers.Conv2D(1, (3,3), activation='linear', padding='same')(x)
 
-    # Backbone
-    b = Conv2D(64, (3, 3), activation='relu', padding='same')(p2)
+    return Model(inputs, outputs)
+
+
+
+# def build_decoder_vae(latent_dim=2):
+#     decoder_inputs = layers.Input(shape=(latent_dim,))
+#     x = layers.Dense(7*7*32, activation='relu')(decoder_inputs)
+#     x = layers.Reshape((7,7,32))(x)
+#     x = layers.Conv2DTranspose(32, (3,3), strides=2, activation='relu', padding='same')(x)
+#     x = layers.Conv2DTranspose(16, (3,3), strides=2, activation='relu', padding='same')(x)
+#     outputs = layers.Conv2D(1, (3,3), activation='sigmoid', padding='same')(x)
+#     decoder = Model(decoder_inputs, outputs, name="decoder")
+#     return decoder
+
+# def build_vae(input_shape=(28,28,1), latent_dim=2, coeff=1.0):
+#     encoder = build_encoder_vae(input_shape, latent_dim, coeff)
+#     decoder = build_decoder_vae(latent_dim)
+#     vae_inputs = layers.Input(shape=input_shape)
+#     z, mu, log_var = encoder(vae_inputs)
+#     reconstructions = decoder(z)
+#     vae = Model(vae_inputs, reconstructions, name="vae")
+#     return vae, encoder, decoder
+
+class Sampling(layers.Layer):
+    def __init__(self, coeff=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.coeff = coeff
+
+    def call(self, inputs):
+        mu, log_var = inputs
+        epsilon = tf.random.normal(shape=tf.shape(mu))
+        z = mu + tf.exp(0.5 * log_var) * epsilon
+        kl_loss = -0.5 * tf.reduce_sum(1 + log_var - tf.square(mu) - tf.exp(log_var), axis=1)
+        self.add_loss(self.coeff * tf.reduce_mean(kl_loss))
+        return z
     
-    model = Model(inputs, b)
-    return model
+def build_encoder(input_shape=(28,28,1), latent_dim=2, coeff=1.0):
+    encoder_inputs = Input(shape=input_shape)
+    x = layers.Conv2D(32, (3,3), activation='relu', padding='same')(encoder_inputs)
+    x = layers.MaxPooling2D((3,3), strides=2, padding='same')(x)
+    x = layers.Conv2D(32, (3,3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling2D((3,3), strides=2, padding='same')(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(16, activation='relu')(x)
+    mu = layers.Dense(latent_dim, name='mu')(x)
+    log_var = layers.Dense(latent_dim, name='log_var')(x)
+    z = Sampling(coeff=coeff)([mu, log_var])
+    encoder = Model(encoder_inputs, [z, mu, log_var], name='encoder')
+    return encoder
 
-def decoder(shape):
-    inputs = Input(shape)    
-    # Decoder 
-    u2 = Conv2DTranspose(32, (3,3), activation='relu', strides=(2,2), padding='same', name='u2')(inputs)
-    u1 = Conv2DTranspose(16, (3,3), activation='relu', strides=(2,2), padding='same', name='u1')(u2)
+def build_decoder(latent_dim=2):
+    decoder_inputs = Input(shape=(latent_dim,))
+    x = layers.Dense(7*7*32, activation='relu')(decoder_inputs)
+    x = layers.Reshape((7,7,32))(x)
+    x = layers.Conv2DTranspose(32, (3,3), strides=2, activation='relu', padding='same')(x)
+    x = layers.Conv2DTranspose(16, (3,3), strides=2, activation='relu', padding='same')(x)
+    outputs = layers.Conv2D(1, (3,3), activation='sigmoid', padding='same')(x)
+    decoder = Model(decoder_inputs, outputs, name='decoder')
+    return decoder
 
-    outputs = Conv2D(1, (1, 1), activation='sigmoid')(u1)
-
-    model = Model(inputs, outputs)
-    return model
-
-
-def auto_encoder(shape):
-    inputs = Input(shape)   
-    x = encoder(shape)(inputs)
-    outputs = decoder(x.shape[1:])(x)
-    model = Model(inputs, outputs)
-    return model
-
-## VAE
-def sampling(mu_log_variance):
-    mu, log_variance = mu_log_variance
-    epsilon = tf.keras.backend.random_normal(shape=tf.keras.backend.shape(mu), mean=0.0, stddev=1.0)
-    random_sample = mu + tf.keras.backend.exp(log_variance/2) * epsilon
-    return random_sample
-
-def loss_func(encoder_mu, encoder_log_variance):
-    def vae_reconstruction_loss(y_true, y_predict):
-        reconstruction_loss_factor = 1000
-        reconstruction_loss = tf.keras.backend.mean(tf.keras.backend.square(y_true-y_predict), axis=[1, 2, 3])
-        return reconstruction_loss_factor * reconstruction_loss
-
-    def vae_kl_loss(encoder_mu, encoder_log_variance):
-        kl_loss = -0.5 * tf.keras.backend.sum(1.0 + encoder_log_variance - tf.keras.backend.square(encoder_mu) - tf.keras.backend.exp(encoder_log_variance), axis=1)
-        return kl_loss
-
-
-    def vae_loss(y_true, y_predict):
-        reconstruction_loss = vae_reconstruction_loss(y_true, y_predict)
-        kl_loss = vae_kl_loss(y_true, y_predict)
-
-        loss = reconstruction_loss + 0*kl_loss
-        #loss = reconstruction_loss 
-        return loss
-
-    return vae_loss
-
-def vae(input_shape, latent_dim=2):
-
-    encoder_model = encoder(input_shape)
-    x = Flatten()(encoder_model.output)
-    x = Dense(64, activation='relu')(x)
-
-    mu = Dense(latent_dim, name='mu')(x)
-    log_var = Dense(latent_dim, name='log_var')(x)
-    z = Lambda(sampling, name="sampling")([mu, log_var])
-
-    decoder_input_shape = encoder_model.output_shape[1:]
-    units = np.prod(decoder_input_shape)
-    x_decoded = Dense(units, activation='relu')(z)
-    x_decoded = Reshape(decoder_input_shape)(x_decoded)
-
-    decoder_model = decoder(decoder_input_shape)
-    outputs = decoder_model(x_decoded)
-
-    vae_model = Model(encoder_model.input, outputs, name="VAE")
-
-    return vae_model, mu, log_var
+def build_vae(input_shape=(28,28,1), latent_dim=2, coeff=0.01):
+    encoder = build_encoder(input_shape, latent_dim, coeff)
+    decoder = build_decoder(latent_dim)
+    vae_inputs = Input(shape=input_shape)
+    z, mu, log_var = encoder(vae_inputs)
+    reconstructions = decoder(z)
+    vae = Model(vae_inputs, reconstructions, name='vae')
+    return vae, encoder, decoder
