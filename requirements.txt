@@ -3,9 +3,9 @@
 -r TP3/requirements.txt
 -r TP4/requirements.txt
 
-numpy
-matplotlib
-scikit-learn
-cvxopt
-tensorflow
-keras
+# numpy
+# matplotlib
+# cvxopt
+# scikit-learn
+# tensorflow
+# keras
